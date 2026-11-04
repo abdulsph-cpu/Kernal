@@ -1,0 +1,2 @@
+# Python automation stays intentionally lightweight and dependency-free.
+# This service can be extended with NumPy, pandas, or telemetry adapters as needed.

@@ -1,0 +1,14 @@
+# Ignore build artifacts and local tooling
+bin/
+obj/
+.vscode/
+.DS_Store
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
+.pytest_cache/
+.venv/
+venv/

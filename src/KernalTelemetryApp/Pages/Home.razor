@@ -1,0 +1,123 @@
+@page "/"
+@inject KernalTelemetryApp.Services.TelemetryProcessorService TelemetryProcessor
+@implements IDisposable
+
+<PageTitle>Silicon telemetry dashboard</PageTitle>
+
+<div class="telemetry-shell">
+    <h1>Silicon telemetry dashboard</h1>
+
+    <div class="status-grid">
+        <div class="card">
+            <span class="label">Average temperature</span>
+            <strong>@AverageTemperatureDisplay</strong>
+        </div>
+        <div class="card">
+            <span class="label">Average power</span>
+            <strong>@AveragePowerDisplay</strong>
+        </div>
+        <div class="card">
+            <span class="label">Peak throughput</span>
+            <strong>@PeakThroughputDisplay</strong>
+        </div>
+        <div class="card">
+            <span class="label">Error rate</span>
+            <strong>@ErrorRateDisplay</strong>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button class="primary" @onclick="ToggleStream">
+            @(_streaming ? "Pause stream" : "Start stream")
+        </button>
+    </div>
+
+    <section class="event-list">
+        <h3>Recent samples</h3>
+        <ul>
+            @foreach (var sample in _recentSamples)
+            {
+                <li>
+                    Core @sample.CoreId • @sample.TemperatureC.ToString("0.0")°C •
+                    @sample.ThroughputMbps.ToString("0.0") Mbps •
+                    @sample.ErrorRate.ToString("0.000") err
+                </li>
+            }
+        </ul>
+    </section>
+</div>
+
+@code {
+    private readonly List<TelemetrySample> _recentSamples = [];
+    private CancellationTokenSource? _streamCts;
+    private Task? _streamTask;
+    private bool _streaming;
+    private TelemetrySummary _summary = new(0, 0, 0, 0, 0);
+
+    private string AverageTemperatureDisplay => $"{_summary.AverageTemperatureC:F1} °C";
+    private string AveragePowerDisplay => $"{_summary.AveragePowerW:F2} W";
+    private string PeakThroughputDisplay => $"{_summary.PeakThroughputMbps:F1} Mbps";
+    private string ErrorRateDisplay => $"{_summary.AverageErrorRate:F4} %";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _summary = await TelemetryProcessor.GetLatestSummaryAsync();
+    }
+
+    private async Task ToggleStream()
+    {
+        if (_streaming)
+        {
+            _streaming = false;
+            _streamCts?.Cancel();
+            return;
+        }
+
+        _streaming = true;
+        _streamCts = new CancellationTokenSource();
+        _streamTask = Task.Run(() => RunTelemetryLoopAsync(_streamCts.Token));
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RunTelemetryLoopAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(150));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                var sample = new TelemetrySample(
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Random.Shared.Next(1, 9),
+                    950 + Random.Shared.NextDouble() * 500,
+                    0.82 + Random.Shared.NextDouble() * 0.18,
+                    38 + Random.Shared.NextDouble() * 22,
+                    1800 + Random.Shared.NextDouble() * 1400,
+                    Random.Shared.NextDouble() * 0.05);
+
+                await TelemetryProcessor.EnqueueAsync(sample, token);
+
+                _recentSamples.Insert(0, sample);
+                if (_recentSamples.Count > 8)
+                {
+                    _recentSamples.RemoveAt(_recentSamples.Count - 1);
+                }
+
+                _summary = await TelemetryProcessor.GetLatestSummaryAsync(token);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected while the stream is paused.
+        }
+    }
+
+    public void Dispose()
+    {
+        _streaming = false;
+        _streamCts?.Cancel();
+        _streamCts?.Dispose();
+    }
+}
